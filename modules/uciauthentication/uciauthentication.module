@@ -1,0 +1,780 @@
+<?php
+
+// $Id: uciauthentication.module,v 1.1.4.3 2011/02/08 20:05:41 johnbarclay Exp $
+
+/**
+ * @file
+ * This module injects itself into Drupal's Authentication stack.
+ */
+ini_set("soap.wsdl_cache_enabled", "0");
+
+define('UCIAUTHENTICATION_AUTHENTICATION_MODE_MIXED', 1);
+define('UCIAUTHENTICATION_AUTHENTICATION_MODE_EXCLUSIVE', 2);
+define('UCIAUTHENTICATION_AUTHENTICATION_MODE_DEFAULT', 1);
+
+define('UCIAUTHENTICATION_AUTHENTICATION_CONFLICT_ACTION_RESOLVE', 1);
+define('UCIAUTHENTICATION_AUTHENTICATION_CONFLICT_ACTION_LOG', 2);
+define('UCIAUTHENTICATION_AUTHENTICATION_CONFLICT_ACTION_DEFAULT', 2);
+
+define('UCIAUTHENTICATION_URL_AUTH_WEBSERVICE', "https://autenticacion2.uci.cu/v4/PasarelaAutenticacionWS.wsdl");
+define('UCIAUTHENTICATION_URL_PHOTO_WEBSERVICE', "http://identificacion.uci.cu/servicios/v5/servicios.wsdl");
+
+function uciauthentication_menu() {
+  $items['admin/config/people/uciauthentication'] = array(
+      'title' => decode_entities('Configuración de la Autenticaci&oacute;n UCI'),
+      'description' => decode_entities('Configurar el modo de autenticaci&oacute;n y la acci&oacute;n a
+			realizar en caso de conflicto de cuentas'),
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('uciauthentication_settings_form'),
+      'access callback' => 'user_access',
+      'access arguments' => array('administer site configuration'),
+  );
+  $items['admin/config/people/uciauthentication/settings'] = array(
+      'title' => 'Opciones',
+      'type' => MENU_DEFAULT_LOCAL_TASK,
+      'access callback' => 'user_access',
+      'access arguments' => array('administer site configuration'),
+      'weight' => 1,
+  );
+  $items['admin/config/people/uciauthentication/test'] = array(
+      'title' => 'Probar servicio',
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('uciauthentication_testing_form'),
+      'access callback' => 'user_access',
+      'access arguments' => array('administer site configuration'),
+      'type' => MENU_LOCAL_TASK,
+      'weight' => 2,
+  );
+  $items['admin/config/people/uciauthentication/update_users'] = array(
+      'title' => 'Actualizar datos de los usuarios',
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('uciauthentication_update_existing_users_form'),
+      'access callback' => 'user_access',
+      'access arguments' => array('administer site configuration'),
+      'type' => MENU_LOCAL_TASK,
+      'weight' => 3,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_menu_alter().
+ * since menu items are cached, only useful to add or alter callbacks
+ * for ldap authentication driven menu items.
+ *
+ */
+function uciauthentication_menu_alter(&$items) {
+  $items['user/password']['access callback'] = 'uciauthentication_show_reset_pwd';
+}
+
+function uciauthentication_show_reset_pwd($user = NULL) {
+  if (!$user) {
+    global $user;
+  }
+
+  $mode = variable_get('uciauthentication_mode', UCIAUTHENTICATION_AUTHENTICATION_MODE_MIXED);
+  if (empty($user->uid)) {
+    return $mode == UCIAUTHENTICATION_AUTHENTICATION_MODE_MIXED;
+  }
+
+  if ($user->uid == 1 || ($mode == UCIAUTHENTICATION_AUTHENTICATION_MODE_MIXED && !isset($user->data['uciauthentication']))) {
+    return TRUE; // always show at user/password url. otherwise user 1 will not be able to reset password.
+  }
+  return FALSE;
+}
+
+function uciauthentication_block_info() {
+  $blocks['uciauthentication_user_info'] = array(
+      // info: The name of the block.
+      'info' => t('Informacion del usuario autenticado'),
+  );
+  return $blocks;
+}
+
+function uciauthentication_block_configure($delta = '') {
+  $form = array();
+  if ($delta) {
+    if (module_exists('image')) {
+      $form['uciauthentication_user_picture_style'] = array(
+          '#type' => 'select',
+          '#title' => t('Picture display style'),
+          '#options' => image_style_options(TRUE),
+          '#default_value' => variable_get('uciauthentication_user_picture_style', ''),
+          '#description' => t('The style selected will be used on display, while the original image is retained. Styles may be configured in the <a href="!url">Image styles</a> administration area.', array('!url' => url('admin/config/media/image-styles'))),
+      );
+    }
+  }
+  return $form;
+}
+
+function uciauthentication_block_save($delta = '', $edit = array()) {
+  if ($delta == 'uciauthentication_user_info') {
+    variable_set('uciauthentication_user_picture_style', $edit['uciauthentication_user_picture_style']);
+  }
+  return;
+}
+
+function uciauthentication_block_view($delta = '') {
+  global $user;
+  $block = array();
+  //The $delta parameter tells us which block is being requested.
+  switch ($delta) {
+    case 'uciauthentication_user_info':
+      if (!empty($user->uid)) {
+        //$block['subject'] = t('Title of first block (example_configurable_text)');
+        $block['content'] = uciauthentication_block_user_info_contents();
+      }
+      break;
+  }
+  return $block;
+}
+
+function uciauthentication_block_user_info_contents() {
+  global $user;
+  drupal_add_css(drupal_get_path("module", "uciauthentication") . "/uciauthentication.css");
+  $output = '';
+  $style = variable_get('uciauthentication_user_picture_style', '');
+  if (is_numeric($user->picture)) {
+    $user->picture = file_load($user->picture);
+  }
+  if (!empty($user->picture->uri)) {
+    $filepath = $user->picture->uri;
+  }
+  $alt = 'Foto de ' . $user->name;
+  @$output .= '<div class="user-info-user-picture">' . theme('image_style', array('style_name' => $style, 'path' => $filepath, 'alt' => $alt, 'title' => $alt)) . '</div>';
+  $output .= '<div class="user-info-user-welcome">' . "Bienvenido " . (isset($user->data['uciauthentication']) ? $user->data['uciauthentication']['Nombres'] : $user->name) . '</div>';
+  $output .= '<div class="user-info-user-logout-link">' . l('Cerrar sesi&oacute;n', 'user/logout', array('html' => TRUE)) . '</div>';
+  return $output;
+}
+
+function uciauthentication_set_user_picture_by_account($account) {
+  if (!empty($account->data['uciauthentication']['IdExpediente'])) {
+    $IdExpediente = $account->data['uciauthentication']['IdExpediente'];
+    $file_object = uciauthentication_get_user_picture_by_idexpediente($IdExpediente);
+    if ($file_object !== FALSE) {
+      $file_object->uid = $account->uid;
+      file_save($file_object);
+      $account->picture = $file_object;
+      user_save($account);
+      return $file_object;
+    }
+  }
+  return FALSE;
+}
+
+function uciauthentication_get_user_picture_by_account($account) {
+  if (!empty($account->data['uciauthentication']['IdExpediente'])) {
+    $IdExpediente = $account->data['uciauthentication']['IdExpediente'];
+    $file_object = uciauthentication_get_user_picture_by_idexpediente($IdExpediente);
+    return $file_object;
+  }
+  return FALSE;
+}
+
+function uciauthentication_get_user_picture_by_idexpediente($IdExpediente) {
+  global $base_url;
+  $directory = 'public://uciphotos';
+  if (!file_prepare_directory($directory, FILE_MODIFY_PERMISSIONS | FILE_CREATE_DIRECTORY)) {
+    drupal_set_message(t('Failed to create %directory.', array('%directory' => $directory)), 'error');
+    return FALSE;
+  }
+  $service = wsclient_service_load('uciauthentication_identificacion');
+  $result = $service->ObtenerFotoDadoIdExpediente($IdExpediente);
+
+  if (!empty($result->idFoto))
+    $picture = $result->valorFoto;
+  if (empty($picture)) {
+    $picture = $base_url . '/' . drupal_get_path('module', 'uciauthentication') . '/sinfoto.jpg';
+    $IdFoto = 'sinfoto';
+  }
+  else {
+    $IdFoto = $result->idFoto;
+  }
+  $fullpath_schema = $directory . '/' . $IdFoto . '.jpg';
+
+  if (!is_file($fullpath_schema)) {
+    $http_response = drupal_http_request($picture);
+    if (isset($http_response->error)) {
+      watchdog('uciauthentication', check_plain($http_response->error), array(), WATCHDOG_CRITICAL);
+      return FALSE;
+    }
+    else {
+      $data = $http_response->data; //file_get_contents($picture);
+      $file_object = file_save_data($data, $fullpath_schema, FILE_EXISTS_REPLACE);
+    }
+  }
+  else{
+    $files = file_load_multiple(array(), array('uri' => $fullpath_schema));
+    $file_object = reset($files);
+    //esta en cache pero no en BD (meterlo en BD)
+    if (!$file_object) {
+	  $file_data_uri = file_create_url($fullpath_schema);
+	  $http_response = drupal_http_request($file_data_uri);
+      $data = $http_response->data; //file_get_contents($picture);
+      $file_object = file_save_data($data, $fullpath_schema, FILE_EXISTS_REPLACE);
+	  
+      /*********************/
+      watchdog('uciauthentication', 'La imagen esta como fichero pero hay que salvarla', array(), WATCHDOG_CRITICAL);
+      return $file_object;
+    }
+  }
+
+  return $file_object;
+}
+
+function uciauthentication_settings_form() {
+  $form = array();
+
+  $form['uciauthentication_mode'] = array(
+      '#title' => 'Modo de autenticación',
+      '#type' => 'radios',
+      '#options' => array(
+          UCIAUTHENTICATION_AUTHENTICATION_MODE_MIXED => t('Mixto'),
+          UCIAUTHENTICATION_AUTHENTICATION_MODE_EXCLUSIVE => t('Exclusivo'),
+      ),
+      '#description' => 'El modo de la autenticación, <i>Mixto</i> en caso de que necesite
+			utilizar cuentas locales conjuntamente con las del dominio, y <i>Exclusivo</i> en caso de que
+			solo sean las que sean verificadas contra el servicio web de autenticación, en este caso
+            solo el usuario con uid 1 le sera permitido autenticarse sin comprobar con el servicio
+            web de autenticación.',
+      '#default_value' => variable_get('uciauthentication_mode', UCIAUTHENTICATION_AUTHENTICATION_MODE_MIXED),
+  );
+
+  $form['uciauthentication_conflict'] = array(
+      '#title' => 'En caso de conflicto',
+      '#type' => 'radios',
+      '#options' => array(
+          UCIAUTHENTICATION_AUTHENTICATION_CONFLICT_ACTION_RESOLVE => t('Asociar cuenta'),
+          UCIAUTHENTICATION_AUTHENTICATION_CONFLICT_ACTION_LOG => t('Escribir en los logs'),
+      ),
+      '#description' => 'En el caso de autenticar un usuario que resulte estar ya registrado, escoja
+			<i>Asociar cuenta</i> en caso de que desee sobreescribir la cuenta existente y <i>Escribir
+			en el log</i> en caso de solo registrar el suceso y esperar la acción del administrador.',
+      '#default_value' => variable_get('uciauthentication_conflict', UCIAUTHENTICATION_AUTHENTICATION_CONFLICT_ACTION_LOG),
+  );
+
+  $form['uciauthentication_https'] = array(
+      '#type' => 'checkbox',
+      '#title' => 'Autenticación a través de HTTPS',
+      '#default_value' => variable_get('uciauthentication_https', FALSE),
+      '#description' => 'Realizar el envio de los datos de autenticación a traves de un canal seguro
+			utilizando el protocolo HTTPS.',
+  );
+
+  return system_settings_form($form);
+}
+
+function uciauthentication_testing_form() {
+  $form = array();
+
+  $form['authname'] = array(
+      '#type' => 'textfield',
+      '#title' => 'Authname',
+      '#required' => TRUE,
+  );
+
+  module_load_include('inc', 'uciauthentication');
+
+  /*$options = _get_dominios();
+  $form['dominio'] = array(
+      '#type' => 'select',
+      '#title' => 'Dominio',
+      '#default_value' => 'uci.cu',
+      '#required' => TRUE,
+      '#options' => $options,
+  );*/
+
+  $form['submit'] = array(
+      '#type' => 'submit',
+      '#value' => 'Test',
+  );
+  return $form;
+}
+
+function uciauthentication_testing_form_submit($form, &$form_state) {
+  $authname = $form_state['values']['authname'];
+  $dominio = 'uci.cu';//$form_state['values']['dominio'];
+  module_load_include('inc', 'uciauthentication');
+  $result = _autenticar_usuario_servicio($authname, '***', $dominio);
+
+  $output = '<pre>' . print_r($result, TRUE) . '</pre>';
+  drupal_set_message(filter_xss($output, array('pre')));
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter(). for user_login
+ */
+function uciauthentication_form_user_login_alter(&$form, &$form_state) {
+  uciauthentication_login_form_changes($form);
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter(). for user_login_block
+ */
+function uciauthentication_form_user_login_block_alter(&$form, &$form_state) {
+  uciauthentication_login_form_changes($form);
+}
+
+/**
+ * validate function for user logon forms.
+ */
+function uciauthentication_user_login_authenticate_validate($form, &$form_state) {
+  //ldap_server_module_load_include('inc', 'ldap_authentication', 'ldap_authentication');
+  //return _ldap_authentication_user_login_authenticate_validate($form_state);
+  $username = $form_state['values']['name'];
+  $pass = $form_state['values']['pass'];
+  $dominio = 'uci.cu';//$form_state['values']['dominio'];
+  $accountname = $username . '@' . $dominio;
+
+  // If there is any validations errors, we do not query LDAP.
+  if (form_get_errors()) {
+    return;
+  }
+
+  $mode = variable_get('uciauthentication_mode', UCIAUTHENTICATION_AUTHENTICATION_MODE_MIXED);
+
+  if (isset($form_state['uid']) && is_numeric($form_state['uid'])) {
+    $account = user_load($form_state['uid']);
+    if (($mode == UCIAUTHENTICATION_AUTHENTICATION_MODE_MIXED && !isset($account->data['uciauthentication'])) || $form_state['uid'] == 1) {
+      return;
+    }
+    elseif ($mode == UCIAUTHENTICATION_AUTHENTICATION_MODE_EXCLUSIVE) {
+      $form_state['uid'] = NULL;
+    }
+  }
+
+  $account = user_load_by_name($accountname);
+  if (is_object($account)) {
+    $account_exists = TRUE;
+    $is_uci = isset($account->data['uciauthentication']);
+  }
+  else {  // account does not exist
+    $account_exists = FALSE;
+  }
+  module_load_include('inc', 'uciauthentication');
+  // Authenticate UCI user.
+  $datosUCI = _autenticar_usuario_servicio($username, $pass, $dominio);
+
+  if (empty($datosUCI->Autenticado)) {
+    form_set_error('name', t('El usuario <i>%name</i>, la contrase&ntilde;a o el dominio son incorrectos', array('%name' => $authname)));
+    return FALSE;
+  }
+
+  if (!$account_exists) {
+    //Register new user
+    uciauthentication_set_user_data($account, $datosUCI, $accountname);
+  }
+  else {
+    $conflict_action = variable_get('uciauthentication_conflict', UCIAUTHENTICATION_AUTHENTICATION_CONFLICT_ACTION_LOG);
+    if ($conflict_action == UCIAUTHENTICATION_AUTHENTICATION_CONFLICT_ACTION_LOG && !$is_uci) {
+      $watchdog_tokens = array('%username' => $authname);
+      watchdog('uciauthentication', '%username : Intento de autenticacion a un usuario local existente.', $watchdog_tokens, WATCHDOG_NOTICE);
+      form_clear_error();
+      form_set_error('name', "Ya existe ese usuario registrado como usuario local");
+      return;
+    }
+    // Update existing user.
+    uciauthentication_set_user_data($account, $datosUCI);
+  }
+
+  // Log user in.
+  /*$fake_form_state = array('uid' => $account->uid);
+  user_login_submit(array(), $fake_form_state);
+  global $user;*/
+  $form_state['uid'] = $account->uid;
+  return $account;
+}
+
+/**
+ * Actualizar los datos del usuario
+ * @param type $account
+ * @param type $datosUCI
+ * @return type
+ */
+function uciauthentication_set_user_data(&$account, $datosUCI, $accountname = NULL) {
+  $data = array();
+  module_load_include('inc', 'uciauthentication');
+  if ($accountname !== NULL) {
+    // Register this new user.
+    $data['name'] = $accountname;
+    $data['init'] = $datosUCI->Correo;
+    $data['pass'] = user_password();
+    $data['status'] = 1;
+    $data['access'] = REQUEST_TIME;
+  }
+  // Common register & Update existing user.
+  $data['mail'] = $datosUCI->Correo; //email can change
+  $data['data']['uciauthentication']['Nombres'] = uciauthentication_fix_username($datosUCI->Nombres);
+  $data['data']['uciauthentication']['Apellidos'] = uciauthentication_fix_username($datosUCI->Apellidos);
+  $data['data']['uciauthentication']['IdExpediente'] = $datosUCI->IdExpediente;
+  $data['field_nombre_y_apellidos']['und'][0]['value'] = $data['data']['uciauthentication']['Nombres'].' '.$data['data']['uciauthentication']['Apellidos'];
+  
+  $account = $accountname !== NULL ? user_save(NULL, $data) : user_save($account, $data);
+  //save foto
+  uciauthentication_set_user_picture_by_account($account);
+  //set authmaps
+  user_set_authmaps($account, array('authname_uciauthentication' => $account->name));
+  //save record data
+  $record = new stdClass();
+  $record->uuid = $datosUCI->IdExpediente;//por el momento
+  $record->uid = $account->uid;
+  $record->name = $account->name;
+  $record->data = $datosUCI;
+  $exists_id_expediente = db_query("SELECT uid FROM {uciauthentication_user_mapping} WHERE uuid = :uuid", array(':uuid' => $datosUCI->IdExpediente))->fetchField();
+  if (!empty($exists_id_expediente))
+    $result = drupal_write_record('uciauthentication_user_mapping', $record, array('uuid'));
+  else {
+    $exists_uid = db_query("SELECT uuid FROM {uciauthentication_user_mapping} WHERE uid = :uid", array(':uid' => $account->uid))->fetchField();
+    if (!empty($exists_uid))
+      $result = drupal_write_record('uciauthentication_user_mapping', $record, array('uid'));
+    else
+      $result = drupal_write_record('uciauthentication_user_mapping', $record);
+  }
+  return ($result === SAVED_NEW || $result === SAVED_UPDATED);
+}
+
+/**
+ * submit function for user logon forms
+ */
+function uciauthentication_user_login(&$edit, $account, $category) {
+  //Redirect to the same URL without a https preffix
+  $https_option = variable_get('uciauthentication_https', FALSE);
+  if ($https_option) {
+    $current_path = current_path();
+    $options = array('query' => drupal_get_query_parameters(), 'https' => FALSE, 'external' => FALSE);
+    drupal_goto($current_path, $options, 301);
+  }
+}
+
+function uciauthentication_form_user_profile_form_alter(&$form, $form_state) {
+
+  // keep in mind admin may be editing another users profile form.
+  // don't assume current global $user
+  $account = $form['#user'];
+  if (isset($account->data['uciauthentication'])) {
+    $form['account']['mail']['#disabled'] = TRUE;
+    $form['account']['mail']['#description'] =
+      t('This email address is automatically set and may not be changed.');
+  }
+  if (!uciauthentication_show_reset_pwd($form['#user'])) {
+    $form['account']['current_pass']['#disabled'] = TRUE;
+    $form['account']['pass']['#disabled'] = TRUE;
+    $form['account']['pass']['#description'] =
+      t('The password is checked with the Autentication Service and may not be changed.');
+    $form['account']['current_pass']['#description'] =
+      t('The password is checked with the Autentication Service and may not be changed.');
+  }
+}
+
+function uciauthentication_login_form_changes(&$form) {
+  $https_setting = variable_get('https', FALSE);
+  $https_option = variable_get('uciauthentication_https', FALSE);
+  if (!$https_setting && $https_option) {
+    drupal_set_message(t('Debe asignar la variable <i>https</i> en TRUE en el fichero settings.php'), 'error');
+    //drupal_access_denied();
+  }
+  /**
+   *
+   * add validate function to test for ldap authentication
+   * should be placed after user_login_authenticate_validate
+   * 1. user_login_name_validate
+   * 2. user_login_authenticate_validate
+   * 3. external authentication validate functions
+   * 4. user_login_final_validate
+   *
+   * as articulated above user_login_default_validators() in user.module
+   *
+   * without any other external authentication modules, this array will start out as:
+   *    array('user_login_name_validate', 'user_login_authenticate_validate', 'user_login_final_validate')
+   */
+  if (@in_array('user_login_authenticate_validate', $form['#validate'])) {
+    $new_validation_sequence = array();
+    foreach ($form['#validate'] as $validate_function_name) {
+      if ($validate_function_name == 'user_login_authenticate_validate') {
+        $mode = variable_get('uciauthentication_mode', UCIAUTHENTICATION_AUTHENTICATION_MODE_MIXED);
+        // if mixed mode, allow drupal authentication first
+        if ($mode == UCIAUTHENTICATION_AUTHENTICATION_MODE_MIXED) {
+          $new_validation_sequence[] = 'user_login_authenticate_validate';
+          $new_validation_sequence[] = 'uciauthentication_user_login_authenticate_validate';
+        }
+        else {
+          $new_validation_sequence[] = 'user_login_authenticate_validate'; //parche
+          $new_validation_sequence[] = 'uciauthentication_user_login_authenticate_validate';
+        }
+      }
+      else {
+        $new_validation_sequence[] = $validate_function_name;
+      }
+    }
+    $form['#validate'] = $new_validation_sequence;
+  }
+
+  $form['name']['#weight'] = 1;
+  $form['name']['#attributes'] = array('placeholder' => 'Usuario UCI');
+  $form['pass']['#weight'] = 2;
+  $form['pass']['#attributes'] = array('placeholder' => decode_entities('Contrase&ntilde;a'));
+  $form['submit']['#weight'] = 4;
+  module_load_include('inc', 'uciauthentication');
+  /*$options = _get_dominios();
+
+  $form['dominio'] = array(
+      '#type' => 'select',
+      '#title' => 'Dominio',
+      '#default_value' => 'uci.cu',
+      '#required' => TRUE,
+      '#options' => $options,
+      '#weight' => 3,
+  );*/
+
+  unset($form['links']);
+
+  //setting HTTPS
+  if ($https_option) {
+    $fullurl = url(current_path(), array('query' => drupal_get_destination(), 'https' => TRUE, 'external' => FALSE));
+    $form['#action'] = $fullurl;
+  }
+
+  $mode = variable_get('uciauthentication_mode', UCIAUTHENTICATION_AUTHENTICATION_MODE_MIXED);
+  if ($mode === UCIAUTHENTICATION_AUTHENTICATION_MODE_EXCLUSIVE) {
+    unset($form['links']);
+  }
+}
+
+function uciauthentication_user_view($account, $view_mode, $langcode) {
+  //drupal_set_title(t('Perfil del usuario <i>@user</i>', array('@user' => $account->name)), PASS_THROUGH);
+  $account->content['user_picture']['#weight'] = -21; // Keep the picture at the top like normal
+  $account->content['summary']['#weight'] = -20;  // Keep the summary next to the picture
+  $account->content['summary']['#title'] = NULL;  // If not NULL, two titles would show up (see line 46 below)
+  $hrsnow = time();
+  $hrsago = $hrsnow - 300;
+  $hrsago1 = $hrsnow - 1500;
+  $hrsago2 = $hrsago1 - 3600;
+  $hrsago3 = $hrsago2 - 7200;
+  $hrsago4 = $hrsago3 - 10800;
+  if ($hrsago <= $account->access) {
+    $lastlogintime = t('Online!');
+  }
+  elseif ($hrsago1 <= $account->access) {
+    $lastlogintime = t('Within the past half hour');
+  }
+  elseif ($hrsago2 <= $account->access) {
+    $lastlogintime = t('About an hour ago');
+  }
+  elseif ($hrsago3 <= $account->access) {
+    $lastlogintime = t('A few hours ago');
+  }
+  elseif ($hrsago4 <= $account->access) {
+    $lastlogintime = t('Several hours ago');
+  }
+  else {
+    $lastlogintime = format_date($account->access);
+  }
+
+  $account->content['summary']['last_access'] = array(
+      '#type' => 'user_profile_item',
+      '#title' => t('Last login'),
+      '#markup' => $lastlogintime,
+      '#weight' => -18,
+  );
+
+  if (isset($account->data['uciauthentication'])) {
+    $outputDatos = '';
+    $outputDatos .= '<div>';
+    $outputDatos .= '<dt>Nombres: </dt><dl>' . $account->data['uciauthentication']['Nombres'] . '</dl>';
+    $outputDatos .= '<dt>Correo: </dt><dl>' . $account->mail . '</dl>';
+    $outputDatos .= '<dt>Solapin: </dt><dl>' . $account->data['uciauthentication']['IdExpediente'] . '</dl>';
+    $outputDatos .= '<div>';
+    $account->content['summary']['dataUCI'] = array(
+        '#type' => 'user_profile_item',
+        '#title' => t('Datos UCI'),
+        '#markup' => $outputDatos,
+        '#weight' => -40,
+    );
+  }
+}
+
+function user_load_by_idexpediente($IdExpediente) {
+  $authname = db_query("SELECT name FROM {uciauthentication_user_mapping} WHERE uuid = :IdExpediente", array('IdExpediente' => $IdExpediente))->fetchField();
+  return user_external_load($authname);
+}
+
+function uciauthentication_username_alter(&$name, $account) {
+  // Display the user's full name instead of name.
+  if (isset($account->uid)) {
+    $user_object = user_load($account->uid);
+	//dsm($user_object);
+    $name = isset($user_object->field_nombre_y_apellidos['und'][0]['value']) ? $user_object->field_nombre_y_apellidos['und'][0]['value'] : (isset($user_object->data['uciauthentication']) && isset($user_object->data['uciauthentication']['Nombres']) ? $user_object->data['uciauthentication']['Nombres'] : $user_object->name);
+    //$name = $user_object->field_nombre_y_apellidos['und'][0]['value'];
+  }
+}
+
+function uciauthentication_user_delete($account) {
+  db_delete('uciauthentication_user_mapping')
+    ->condition('uid', $account->uid)
+    ->execute();
+}
+
+function uciauthentication_update_existing_users_form() {
+  $form['description'] = array(
+      '#type' => 'markup',
+      '#markup' => t('Este formulario servira para actualizar los datos de un
+        usuario en especifico o todos los usuarios'),
+  );
+
+  $form['authname'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Actualizar el usuario con nombre'),
+      '#description' => t('El nombre de usuario @ dominio ejemplo usuario@uci.cu'),
+  );
+
+  /*$form['update_all'] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Actualizar todos los usuarios'),
+  );*/
+
+  $form['submit'] = array(
+      '#type' => 'submit',
+      '#value' => 'UPDATE DATA'
+  );
+  return $form;
+}
+
+function uciauthentication_update_existing_users_form_submit($form, &$form_state) {
+  /*$update_all = $form_state['values']['update_all'];
+  if (!empty($update_all)) {
+    //$batch = uciauthentication_user_update_batch_task_definition();
+    //batch_set($batch);
+  }
+  else {*/
+    $authname = $form_state['values']['authname'];
+    $user_data = user_load_by_name($authname);
+    if (empty($user_data->uid)) {
+      drupal_set_message(t('En caso de no actualizarlos todos debe entrar un nombre de usuario valido'));
+    }
+    else{
+      $batch = uciauthentication_user_update_batch_task_definition($user_data);
+      batch_set($batch);
+    }
+  //}
+}
+
+function uciauthentication_user_update_batch_task_definition($user = NULL) {
+  if ($user === NULL) {
+    $count_users = db_query('SELECT COUNT(DISTINCT uid) FROM {users}')->fetchField() - 1;
+    $num_operations = $count_users;
+
+    $operations = array();
+    for ($i = 0; $i < $num_operations; $i++) {
+      $user = db_select('users', 'u')
+        ->fields('u', array('uid', 'name'))
+        ->condition('uid', 1, '>=')
+        ->range($i, 1)
+        ->orderBy('uid', 'ASC')
+        ->execute()->fetchObject();
+      $operations[] = array('uciauthentication_user_update_batch_task', array($user, $num_operations));
+    }
+  }
+  else {
+    $operations = array();
+    $operations[] = array('uciauthentication_user_update_batch_task', array($user, 1));
+  }
+
+  $batch = array(
+    'operations' => $operations,
+    'finished' => 'uciauthentication_batch_task_finished',
+    'title' => t('Processing users'),
+    'init_message' => t('Batch is starting.'),
+    'progress_message' => t('Processed @current out of @total.'),
+    'error_message' => t('Batch has encountered an error.'),
+  );
+  return $batch;
+}
+
+function uciauthentication_user_update_batch_task($user, $max, &$context) {
+  // Use the $context['sandbox'] at your convenience to store the
+  // information needed to track progression between successive calls.
+  if (empty($context['sandbox'])) {
+    $context['sandbox'] = array();
+    $context['sandbox']['progress'] = 0;
+
+    // Save user count for the termination message.
+    $context['sandbox']['max'] = $max;
+  }
+
+  $authname = $user->name;
+  list($username, $domain) = explode('@', $authname);
+  module_load_include('inc', 'uciauthentication');
+  $datosUCI = _autenticar_usuario_servicio($username, 'xxx', $domain);
+  if (!empty($datosUCI->IdExpediente)) {
+    $account_data = user_load($user->uid);
+    uciauthentication_set_user_data($account_data, $datosUCI);
+    $context['message'] = check_plain($authname) . ' data updated';
+  }
+  else
+    $context['message'] = check_plain($authname) . ' data not updated';
+  // Store some results for post-processing in the 'finished' callback.
+  // The contents of 'results' will be available as $results in the
+  // 'finished' function (in this example, batch_example_finished()).
+  //$context['results'][] = $node->nid . ' : ' . check_plain($node->title) . ' ' . $operation_details;
+
+  // Update our progress information.
+  $context['sandbox']['progress']++;
+
+  // Inform the batch engine that we are not finished,
+  // and provide an estimation of the completion level we reached.
+  if ($context['sandbox']['progress'] != $context['sandbox']['max']) {
+    $context['finished'] = ($context['sandbox']['progress'] >= $context['sandbox']['max']);
+  }
+}
+
+/**
+ * Batch 'finished' callback used by both batch 1 and batch 2.
+ */
+function uciauthentication_batch_task_finished($success, $results, $operations) {
+  if ($success) {
+    // Here we could do something meaningful with the results.
+    // We just display the number of nodes we processed...
+    drupal_set_message(t('Update process finished'));
+  }
+  else {
+    // An error occurred.
+    // $operations contains the operations that remained unprocessed.
+    $error_operation = reset($operations);
+    drupal_set_message(t('An error occurred while processing @operation with arguments : @args', array('@operation' => $error_operation[0], '@args' => print_r($error_operation[0], TRUE))));
+  }
+}
+
+/**
+ * Implements hook_default_wsclient_service().
+ */
+function uciauthentication_default_wsclient_service() {
+  // UCIAuthentication service (SOAP)
+  $services = array();
+  $service = new WSClientServiceDescription();
+  $service->name = 'uciauthentication_autenticacion';
+  $service->label = 'Servicio de Autenticacion UCI (PASARELA)';
+  $service->url = UCIAUTHENTICATION_URL_AUTH_WEBSERVICE;
+  $service->type = 'soap';
+  try {
+    $service->endpoint()->initializeMetaData();
+    $services[$service->name] = $service;
+  }
+  catch (WSClientException $e) {
+    watchdog('wsclient', $e->__toString());
+  }
+
+  // UCIAuthentication service (SOAP)
+  $service = new WSClientServiceDescription();
+  $service->name = 'uciauthentication_identificacion';
+  $service->label = 'Servicio de Identificacion UCI (FOTO)';
+  $service->url = UCIAUTHENTICATION_URL_PHOTO_WEBSERVICE;
+  $service->type = 'soap';
+  try {
+    $service->endpoint()->initializeMetaData();
+    $services[$service->name] = $service;
+  }
+  catch (WSClientException $e) {
+    watchdog('wsclient', $e->__toString());
+  }
+  return $services;
+}

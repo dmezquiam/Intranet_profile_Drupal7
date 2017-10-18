@@ -1,0 +1,16 @@
+name = intranet_calendario
+description = Muestra un calendario
+core = 7.x
+package = Intranet
+version = 7.x-1.0
+project = intranet_calendario
+dependencies[] = calendar
+dependencies[] = ctools
+dependencies[] = date
+dependencies[] = date_views
+dependencies[] = entity
+dependencies[] = features
+dependencies[] = views
+features[ctools][] = views:views_default:3.0
+features[features_api][] = api:1
+features[views_view][] = calendario_de_noticias

@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the Bases legales feature.
+ */
+
+include_once 'intranet_bases_legales.features.inc';

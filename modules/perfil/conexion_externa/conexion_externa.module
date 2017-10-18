@@ -1,0 +1,170 @@
+<?php
+
+/**
+ * El módulo Conexión externa.
+ *
+ * Permite configurar una base de datos externa a la de Drupal, a la
+ * que se podrá acceder desde cualquier módulo cuando se desee.
+ * 
+ */
+
+
+/**
+ * Implements hook_menu().
+ */
+function conexion_externa_menu() {
+  $items = array();
+  $items['admin/config/development/conexion_externa'] = array(
+    'title' => 'Conexión externa',
+    'description' => 'Configuración de una base de datos a la que se podrá conectar en cualquier momento.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('conexion_externa_form'),
+    'access callback' => TRUE,
+    'type' => MENU_NORMAL_ITEM,
+    );
+  return $items;
+}
+
+/**
+ * Implements hook_form().
+ */
+function conexion_externa_form($form, &$form_state) {
+    
+  drupal_set_title('Configuración de la base de datos');
+    
+  $form['gestores_bd'] = array(
+    '#type' => 'radios',
+    '#default_value' => 'mysql',
+    '#required' => TRUE,
+    '#options' => array(
+        'mysql'    => t('MySQL'),
+        'postgres' => t('PostgreSQL'),
+    ),
+    '#title' => t('Tipo de base de datos'),
+    '#description' => t('El tipo de base de datos a la que se conectará.'),
+  );
+
+    $form['server'] = array(
+      '#type' => 'textfield',
+      '#title' => 'Servidor de la base de datos',
+      '#default_value' => '',
+      '#required' => TRUE,
+        // Los nombres de los servidores pueden ser de 255 caracteres como máximo.
+      '#maxlength' => 255,
+      '#size' => 45,
+      '#description' => t('Indíque aquí en que servidor está ubicada su base de datos.'),
+    );    
+    
+    $form['bd'] = array(
+      '#type' => 'textfield',
+      '#title' => 'Nombre de la base de datos',
+      '#required' => TRUE,
+      '#size' => 45,
+      '#description' => 'El nombre de la base de datos a donde se conectará. Debe existir en el "\n"
+                            servidor antes de conectarse.',
+    );
+       
+    $form['user'] = array(
+      '#type' => 'textfield',
+      '#title' => 'Nombre de usuario de la base de datos',
+      '#required' => TRUE,
+      '#size' => 45,
+    );
+    
+    $form['pass'] = array(
+      '#type' => 'password',
+      '#title' => 'Contraseña de la base de datos',
+      '#size' => 45,
+    );
+    
+    $form['more_info'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Informacion adicional'),
+    '#collapsible' => TRUE,
+    '#collapsed' => TRUE,
+    '#description' => 'Estas opciones sólo son necesarias en algunos casos. Si no está seguro de qué debe escribir aquí, deje las opciones predefinidas o consulte con su proveedor de alojamiento.',
+     );
+    
+    $form['more_info']['puerto'] = array(
+      '#type' => 'textfield',
+      '#title' => 'Puerto de la base de datos',
+        // El número máximo de puerto es 65536, de 5 dígitos.
+      '#maxlength' => 5,
+      '#size' => 45,
+      '#description' => 'Si el servidor de bases de datos escucha un puerto que no es el estándar, escriba su número.',
+    );  
+    
+    $form['more_info']['prefijo'] = array(
+      '#type' => 'textfield',
+      '#title' => 'Prefijo de las tablas ',
+      '#size' => 45,
+      '#description' => 'Si más de una aplicación está utilizando la base de datos, introduzca un prefijo, como drupal_, para su sitio Drupal.',
+    );     
+    
+    $form['submit'] = array(
+     '#type' => 'submit',
+     '#value' => 'Guardar configuración',
+	);
+    
+    return $form;
+}
+
+
+function conexion_externa_form_validate($form, &$form_state) {
+    // Verificar el prefijo de las tablas.
+    $prefijo = $form_state['values']['prefijo'];
+    if (($prefijo != '') && !preg_match('/^[A-Za-z0-9_.]+$/', $prefijo)) {
+      form_error($form['more_info']['prefijo'], 'El prefijo de las tablas de la base de datos %prefix es inválido. El prefijo de las tablas solo puede contener caractéres alfanuméricos, periods, o underscores', array('%prefix' => $form_state['values']['prefijo']));
+    }
+
+    // Verificar el puerto.
+    $puerto = $form_state['values']['puerto'];
+    if (($puerto != '') && !is_numeric($puerto)) {
+      form_error($form['more_info']['puerto'], 'El puerto debe ser un valor numérico');     
+    }
+}
+
+
+function conexion_externa_form_submit($form, &$form_state) {    
+// Guardar los datos en la tabla 'conexion' para ser usados despues por otros modulos.              
+$result = db_insert('conexion')
+ ->fields(array(
+   'driver' => $form_state['values']['gestores_bd'] == 0 ?  'mysql' : 'pgsql', 
+   'host' => $form_state['values']['server'],
+   'database' => $form_state['values']['bd'],
+   'username' => $form_state['values']['user'],
+   'password' => $form_state['values']['pass'],            
+   'puerto' => $form_state['values']['puerto'],
+   'prefijo' => $form_state['values']['prefijo'],
+      ));
+$result->execute();  
+
+//activar si no da error la conexion.
+variable_set('conexion_activada', TRUE);
+
+drupal_set_message('La base de datos se ha configurado ');                
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

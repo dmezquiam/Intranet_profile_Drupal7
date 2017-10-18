@@ -1,0 +1,5 @@
+name = Conexion externa
+description = Permite configurar una base de datos externa a la que se podra conectar en cualquier momento.
+package = Intranet
+core = 7.x
+

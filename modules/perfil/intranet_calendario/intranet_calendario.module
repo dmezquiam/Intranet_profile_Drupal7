@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the intranet_calendario feature.
+ */
+
+include_once 'intranet_calendario.features.inc';

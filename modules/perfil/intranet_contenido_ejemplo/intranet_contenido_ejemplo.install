@@ -1,0 +1,66 @@
+<?php
+
+/**
+ * Implements hook_install().
+ */
+function intranet_contenido_ejemplo_install(){    
+    // Titulos para el tipo de contenido "aviso".
+    $titulos = array(
+        0  => '» Curso de Drupal',
+        1  => '» IV Olimpiada de Programación',
+        2  => '» Forum de Ciencia',
+        3  => '» Concurso de Fotografía',
+        4  => '» Premios festival UCI',
+        5  => '» Festival de trabajadores ',
+        6  => '» Jornada del idioma',
+        7  => '» Cambio de categoria ',
+        8  => '» Inicio de postgrados',
+        9  => '» Juego de pelota',
+        10 => '» Concierto en el Karl Marx',
+    );    
+    // Contenido para las noticias.
+    for($i = 0; $i <= 10; $i++){
+        $node = new StdClass();
+        $node->created = time();
+        $node->changed = $node->created;
+        $node->promote = $i == 0 ? 1 : 0;
+        $node->sticky = 0;
+        $node->revision = 0;
+        $node->uid = 1;
+        $node->name='admin';
+        $node->teaser = '';
+        $node->validated = 1;
+        $node->is_new = 1;            
+        $node->type = 'noticia';
+        $node->title =  $i == 0 ? 'Mi primera noticia de ejemplo' : 'Titulo de la noticia';
+        $node->field_descripcion['und'][0]['value'] = 'Esto es una noticia de ejemplo';
+        node_save($node);
+   }       
+   // Contenido para los avisos.
+ for($i = 0; $i <= 10; $i++){
+        $node = new StdClass();
+        $node->created = time();
+        $node->changed = $node->created;
+        $node->promote = 0;
+        $node->sticky = 0;
+        $node->revision = 0;
+        $node->uid = 1;
+        $node->name='admin';
+        $node->teaser = '';
+        $node->validated = 1;
+        $node->is_new = 1;            
+        $node->type = 'aviso';
+        $node->title =  $titulos[$i];        
+        node_save($node);
+   }             
+}
+
+
+
+
+                
+                 
+                
+        
+    
+

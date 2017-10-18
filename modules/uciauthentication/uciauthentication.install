@@ -1,0 +1,102 @@
+<?php
+
+/**
+ * @file
+ * Install, update, and uninstall functions for the XXX module.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function uciauthentication_install() {
+  // Enable a basic secure login configuration by default.
+  variable_set('uciauthentication_mode', 1);
+  variable_set('uciauthentication_conflict', 2);
+  variable_set('uciauthentication_https', FALSE);
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function uciauthentication_uninstall() {
+  variable_del('uciauthentication_mode');
+  variable_del('uciauthentication_conflict');
+  variable_del('uciauthentication_https');
+}
+
+function uciauthentication_requirements($phase) {
+  $requirements = array();
+  if ($phase == 'runtime') {
+    $requirements['uciauthentication_https'] = array(
+      'title' => t('Autenticacion UCI HTTPS'),
+      'value' => t('No activada'),
+      'severity' => REQUIREMENT_OK,
+    );
+    $https = variable_get('uciauthentication_https', FALSE);
+    if ($https)
+      $requirements['uciauthentication_https']['value'] = t('Activada');
+    $https_settings = variable_get('https', FALSE);
+    if ($https && !$https_settings) {
+      $requirements['uciauthentication_https']['value'] = t('HTTPS config value is FALSE');
+      $requirements['uciauthentication_https']['description'] = 'El valor de la variable <i>https</i> esta en false
+				o no esta configurado en el fichero settings.php';
+      $requirements['uciauthentication_https']['severity'] = REQUIREMENT_ERROR;
+    }
+
+    $requirements['uciauthentication_photo_directory'] = array(
+      'title' => t('Autenticacion UCI Photo Directory'),
+      'value' => t('Creado correctamente'),
+      'severity' => REQUIREMENT_OK,
+    );
+
+    $directory = 'public://uciphotos';
+    if (!file_prepare_directory($directory, FILE_MODIFY_PERMISSIONS | FILE_CREATE_DIRECTORY)) {
+      $requirements['uciauthentication_photo_directory']['value'] = t('Failed to create %directory.', array('%directory' => $directory));
+      $requirements['uciauthentication_photo_directory']['description'] = '';
+      $requirements['uciauthentication_photo_directory']['severity'] = REQUIREMENT_ERROR;
+    }
+  }
+  return $requirements;
+}
+
+/**
+ * Implementation of hook_schema();
+ */
+function uciauthentication_schema() {
+  $schema = array();
+
+  $schema['uciauthentication_user_mapping'] = array(
+    'description' => 'Guarda la asociacion del identificador de cada usuario con el nombre',
+    'fields' => array(
+      'uuid' => array(
+        'description' => 'Primary Key: Unique user ID. userdomain, IdExpediente',
+        'type' => 'varchar',
+        'length' => '64',
+        'not null' => TRUE,
+      ),
+      'name' => array(
+        'type' => 'varchar',
+        'length' => 60,
+        'not null' => TRUE,
+        'default' => '',
+        'description' => 'Unique user name.user@domain',
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => "User's {users}.uid.",
+      ),
+      'data' => array(
+        'description' => 'Extra data.',
+        'type' => 'blob',
+        'not null' => FALSE,
+        'size' => 'big',
+        'serialize' => TRUE,
+      ),
+    ),
+    'primary key' => array('uuid'),
+  );
+
+  return $schema;
+}

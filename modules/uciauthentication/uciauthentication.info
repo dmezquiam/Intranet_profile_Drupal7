@@ -1,0 +1,7 @@
+name = Autenticación UCI
+description = "Implementa la autenticación a través de la pasarela de autenticación."
+core = 7.x
+package = Intranet
+version = "7.x-3.4"
+configure = admin/config/people/uciauthentication
+dependencies[] = wsclient_soap

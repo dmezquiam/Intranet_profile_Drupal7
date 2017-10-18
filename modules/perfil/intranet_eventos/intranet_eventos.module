@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the Eventos feature.
+ */
+
+include_once 'intranet_eventos.features.inc';

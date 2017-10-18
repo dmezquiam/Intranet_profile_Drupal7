@@ -1,0 +1,91 @@
+<?php
+
+/**
+* Implements hook_block_info().
+*/
+function cumples_block_info() {	
+	$blocks['bloque_cumpleanos'] = array(
+		'info' => 'Cumples',
+		'cache' => DRUPAL_NO_CACHE,	
+                'status' => TRUE,
+                'region' => 'sidebar_first',
+                'weight' => 1,    
+	);
+ return $blocks; 
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function cumples_block_view($delta='') {  
+  $block = array();
+  switch ($delta) {
+    case 'bloque_cumpleanos':
+      $block['subject'] = 'Cumpleanos de hoy';
+        
+     //verificar si la BD externa esta configurada para acceder a ella.
+     // if (variable_get('conexion_activada', FALSE)) {        
+	   $listado['festejados'] = conexion_bd_perfil();
+	   $block['content'] = theme('listado_festejados', $listado);
+           break;
+      // }
+      $block['content'] = t('No se puede conectar a la base de datos. Verifique la conexion en la <a href="@bd">Configuracion de la base de datos</a>.', array('@bd' => url('admin/config/development/conexion_externa')));
+      break;
+  }
+  return $block;
+}
+
+/**
+ * Implements of hook_theme()
+ */
+function cumples_theme() {
+  return array(
+    'listado_festejados' => array(
+      'template' => 'listado_festejados',
+      'variables' => array('festejados' => NULL),
+    ),
+  );
+}
+
+
+
+//tratar de hacer este metodo generico en el modulo conexion_externa, pasandole una query por parametro
+function conexion_bd_perfil() {    
+	$path = drupal_get_path('module', 'cumples');
+        require_once DRUPAL_ROOT . '/' . $path . '/cumples.conexion.inc';
+    
+	/*
+	// Devuelve todos los campos de la tabla 'conexion'.
+	$query = db_select('conexion', 'c')->fields('c');	
+	$result = $query->execute()->fetchAll(PDO::FETCH_COLUMN, 0);
+		
+	Guardar en el arreglo 'db_perfil' los valores de los campos devueltos de la consulta.
+	$db_perfil = array(
+		  'driver'   => $result[0], 
+		  'host'     => $result[1],
+		  'database' => $result[2],
+		  'username' => $result[3],
+		  'password' => $result[4],            
+		  'puerto'   => $result[5],
+		  'prefijo'  => $result[6],
+		);
+	*/
+
+        $perfil = array(
+		  'driver'   => 'mysql', 
+		  'host'     => 'localhost',
+		  'database' => 'bd_externa',
+		  'username' => 'root',
+		  'password' => '',            
+		  'puerto'   => '',
+		  'prefijo'  => '',
+		);	
+		Database::addConnectionInfo('id_db_perfil', 'default', $perfil); 
+		db_set_active('id_db_perfil');						
+		$todos_ci = db_query('SELECT ci FROM {personas}')->fetchAll(PDO::FETCH_COLUMN, 0);
+		$listado = nombre_edad($todos_ci);					
+		db_set_active(); 
+                
+    return $listado;
+}
+

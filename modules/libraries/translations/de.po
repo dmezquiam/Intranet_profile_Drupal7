@@ -1,0 +1,20 @@
+# German translation of Libraries API (7.x-2.0)
+# Copyright (c) 2012 by the German translation team
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Libraries API (7.x-2.0)\n"
+"POT-Creation-Date: 2012-07-29 11:51+0000\n"
+"PO-Revision-Date: YYYY-mm-DD HH:MM+ZZZZ\n"
+"Language-Team: German\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n!=1);\n"
+
+msgid "Libraries"
+msgstr "Libraries (Bibliotheken)"
+msgid "Allows version dependent and shared usage of external libraries."
+msgstr ""
+"Erlaubt versionsgebundene und gemeinsame Nutzung externer "
+"Bibliotheken."

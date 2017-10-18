@@ -1,0 +1,10 @@
+name = cumples
+description = Muestra el nombre y la edad de las personas que cumplean ano hoy.
+package = Intranet
+core = 7.x
+;dependencies[] = conexion_externa
+files[] = cumples.conexion.inc
+files[] = cumples.module
+
+
+

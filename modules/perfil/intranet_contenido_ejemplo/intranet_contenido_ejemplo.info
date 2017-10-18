@@ -1,0 +1,6 @@
+name = Contenido de ejemplo
+description = Instala contenido de ejemplo en los tipos de contenido.
+package = Intranet
+core = 7.x
+
+

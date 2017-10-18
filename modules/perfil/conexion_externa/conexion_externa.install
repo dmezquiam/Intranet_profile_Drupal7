@@ -1,0 +1,68 @@
+<?php
+
+/**
+ * Implements hook_schema().
+ */
+function conexion_externa_schema() {
+  $schema['conexion'] = array(    
+    'fields' => array(
+      'driver' => array(        
+        'description' => 'probando tabla',
+        'type' => 'text',
+        'length' => 32,
+       // 'not null' => TRUE,
+        //'default' => '',
+      ),     
+      'host' => array(       
+        'description' => 'probando tabla',
+        'type' => 'text',
+        'length' => 32,
+       // 'not null' => TRUE,
+        //'default' => '',
+      ),
+      'database' => array(        
+        'description' => 'probando tabla',
+        'type' => 'text',
+        'length' => 32,
+        //'not null' => TRUE,
+        //'default' => '',
+      ),
+      'username' => array(        
+        'description' => 'probando tabla',
+        'type' => 'text',
+        'length' => 32,
+        //'not null' => TRUE,
+        //'default' => '',
+      ),
+      'password' => array(       
+        'description' => 'probando tabla',
+        'type' => 'text',
+        'length' => 32,
+       // 'not null' => TRUE,
+        //'default' => '',
+      ),
+      'puerto' => array(        
+        'description' => 'probando tabla',
+        'type' => 'text',
+        'length' => 32,
+        //'not null' => TRUE,
+        //'default' => '',
+      ),
+      'prefijo' => array(        
+        'description' => 'probando tabla',
+        'type' => 'text',
+        'length' => 32,
+       // 'not null' => TRUE,
+        //'default' => '',
+      ),      
+    ),    
+    'primary key' => array('driver'),
+  );
+  return $schema;
+}
+/**
+ * Implements hook_uninstall().
+ */
+function conexion_externa_uninstall() {
+    db_delete('conexion')->execute();
+}

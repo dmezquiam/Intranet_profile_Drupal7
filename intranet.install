@@ -1,0 +1,44 @@
+<?php
+
+/**
+ * Implements hook_install().
+ */
+function intranet_install() {    
+ //Establece 2 min como tiempo maximo de ejecucion en el servidor.  
+ set_time_limit(120);
+  
+// Ejecuta la instalación del perfil standard.
+include_once DRUPAL_ROOT . '/profiles/standard/standard.install';
+standard_install();
+ 
+// Establecer tema por defecto.
+db_update('system')
+  ->fields(array('status' => 1))
+  ->condition('type', 'theme')
+  ->condition('name', 'businesstime')
+  ->execute();
+
+// Configurar el tema.
+variable_set('theme_default', 'businesstime');
+
+// Crear el rol de editor.
+ $editor = new stdClass();
+ $editor->name = 'editor';
+ $editor->weight = 3;
+ user_role_save($editor);
+
+ // Configurar el rol de editor.
+ variable_set('rol_editor', $editor->rid);
+
+ // Asignar al usuario 2 el rol de "editor".
+ db_insert('users_roles')
+   ->fields(array('uid' => 2, 'rid' => $editor->rid))
+   ->execute();
+}
+
+
+
+
+
+
+
